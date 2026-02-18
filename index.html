@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nature Backgammon</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome & Google Fonts -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Custom Config for Tailwind to match the "Organic" theme -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        wood: {
+                            100: '#f7eadd',
+                            200: '#e6cea0',
+                            300: '#d2b48c',
+                            400: '#8b5a2b',
+                            500: '#5c3a1e',
+                            800: '#3e2714',
+                        },
+                        nature: {
+                            green: '#6b8c42',
+                            darkGreen: '#3a5a40',
+                            cream: '#fefae0',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Nunito', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Specific Chromebook scrollbar hiding and selection disabling */
+        body { user-select: none; -webkit-user-select: none; overflow: hidden; }
+        .checker { transition: all 0.2s ease-out; box-shadow: 2px 2px 5px rgba(0,0,0,0.4); }
+        .point-triangle { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); }
+        .point-triangle-down { clip-path: polygon(50% 100%, 0% 0%, 100% 0%); }
+        
+        /* Animation classes */
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+        .animate-bounce-soft { animation: bounce 1s infinite; }
+        
+        /* Modal Backdrop */
+        .modal-backdrop { background-color: rgba(62, 39, 20, 0.85); }
+    </style>
+</head>
+<body class="bg-wood-800 h-screen w-screen flex items-center justify-center font-sans text-wood-800">
+
+    <div id="root" class="w-full h-full"></div>
+
+    <script type="text/babel">
+
+        // ==========================================
+        // TEACHER CONFIGURATION ZONE
+        // Edit these values to change the game!
+        // ==========================================
+        const CONFIG = {
+            // Is the computer hard to beat? (true = plays smarter, false = plays random)
+            hardMode: false, 
+            
+            // Speed of the computer moves in milliseconds (1000 = 1 second)
+            computerSpeed: 1200,
+
+            // Show green dots for valid moves? (Great for 4th graders)
+            showHints: true,
+
+            // Text shown in the "About" popup
+            teacherMessage: "Welcome to Class 4B Backgammon! Remember: Plan ahead, protect your checkers, and be a good sport!",
+        };
+        // ==========================================
+
+
+        // --- Game Logic Helpers ---
+
+        // Initial Board Setup: Standard Backgammon Layout
+        // Indices 0-23 represent the points. 
+        // White moves 23 -> 0. Black moves 0 -> 23.
+        const INITIAL_BOARD = Array(24).fill(null).map(() => ({ player: null, count: 0 }));
+        
+        // Helper to set up pieces
+        const setupBoard = () => {
+            const b = JSON.parse(JSON.stringify(INITIAL_BOARD));
+            const place = (idx, player, count) => { b[idx] = { player, count }; };
+            
+            // Standard Setup
+            place(0, 'black', 2);
+            place(5, 'white', 5);
+            place(7, 'white', 3);
+            place(11, 'black', 5);
+            place(12, 'white', 5);
+            place(16, 'black', 3);
+            place(18, 'black', 5);
+            place(23, 'white', 2);
+            return b;
+        };
+
+        const STORAGE_KEY = 'backgammon_class_4_v1';
+
+        // React Components
+
+        const Achievement = ({ icon, title, desc, unlocked }) => (
+            <div className={`flex items-center p-2 mb-2 rounded-lg border-2 ${unlocked ? 'bg-nature-cream border-nature-green text-nature-darkGreen' : 'bg-gray-200 border-gray-400 text-gray-500 opacity-60'}`}>
+                <div className="text-2xl mr-3 w-10 text-center">
+                    <i className={`fas ${icon}`}></i>
+                </div>
+                <div>
+                    <div className="font-bold text-sm">{title}</div>
+                    <div className="text-xs">{desc}</div>
+                </div>
+                {unlocked && <div className="ml-auto text-nature-green"><i className="fas fa-check-circle"></i></div>}
+            </div>
+        );
+
+        const Modal = ({ title, children, onClose }) => (
+            <div className="fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-4">
+                <div className="bg-wood-100 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border-4 border-wood-400">
+                    <div className="bg-wood-300 p-4 rounded-t-lg border-b-2 border-wood-400 flex justify-between items-center">
+                        <h2 className="text-2xl font-bold text-wood-800">{title}</h2>
+                        <button onClick={onClose} className="bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center">
+                            <i className="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div className="p-6">
+                        {children}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const App = () => {
+            // State
+            const [board, setBoard] = React.useState(setupBoard());
+            const [turn, setTurn] = React.useState('white'); // 'white' (Player) or 'black' (CPU/P2)
+            const [dice, setDice] = React.useState([]);
+            const [movesLeft, setMovesLeft] = React.useState([]);
+            const [bar, setBar] = React.useState({ white: 0, black: 0 });
+            const [off, setOff] = React.useState({ white: 0, black: 0 });
+            const [selectedPoint, setSelectedPoint] = React.useState(null);
+            const [validDestinations, setValidDestinations] = React.useState([]);
+            const [winner, setWinner] = React.useState(null);
+            const [gameMode, setGameMode] = React.useState('cpu'); // 'cpu' or 'local'
+            const [showRules, setShowRules] = React.useState(false);
+            const [showAchievements, setShowAchievements] = React.useState(false);
+            
+            // Achievements State
+            const [achievements, setAchievements] = React.useState({
+                firstWin: false,
+                firstHit: false, // Hitting an opponent (sending to bar)
+                safeHouse: false, // Making a point (stack of 2)
+                runner: false, // Bearing off a checker
+                master: false, // 5 Wins
+            });
+            const [stats, setStats] = React.useState({ wins: 0, gamesPlayed: 0 });
+
+            // Load Progress
+            React.useEffect(() => {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    setAchievements(parsed.achievements);
+                    setStats(parsed.stats);
+                }
+            }, []);
+
+            // Save Progress
+            const saveProgress = (newAchievements, newStats) => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify({ achievements: newAchievements, stats: newStats }));
+            };
+
+            const unlockAchievement = (key) => {
+                if (!achievements[key]) {
+                    const newAch = { ...achievements, [key]: true };
+                    setAchievements(newAch);
+                    saveProgress(newAch, stats);
+                    // Could play a sound here
+                }
+            };
+
+            // Dice Roll
+            const rollDice = () => {
+                const d1 = Math.floor(Math.random() * 6) + 1;
+                const d2 = Math.floor(Math.random() * 6) + 1;
+                let newMoves = [d1, d2];
+                if (d1 === d2) newMoves = [d1, d1, d1, d1]; // Doubles!
+                setDice([d1, d2]);
+                setMovesLeft(newMoves);
+                
+                // If AI turn, trigger AI thought
+                if (gameMode === 'cpu' && turn === 'black') {
+                    // Logic handled in useEffect to allow render update first
+                }
+            };
+
+            // Switch Turn
+            const endTurn = () => {
+                setSelectedPoint(null);
+                setValidDestinations([]);
+                const nextPlayer = turn === 'white' ? 'black' : 'white';
+                setTurn(nextPlayer);
+                setDice([]); // Clear dice to force roll
+                setMovesLeft([]);
+            };
+
+            // AI Logic Effect
+            React.useEffect(() => {
+                if (gameMode === 'cpu' && turn === 'black' && !winner) {
+                    if (dice.length === 0) {
+                        setTimeout(() => rollDice(), 1000);
+                    } else if (movesLeft.length > 0) {
+                        setTimeout(() => executeAIMove(), CONFIG.computerSpeed);
+                    } else {
+                        setTimeout(() => endTurn(), 1000);
+                    }
+                }
+            }, [turn, dice, movesLeft, gameMode, winner]);
+
+            // AI Move Execution
+            const executeAIMove = () => {
+                // Simplified AI for 4th graders:
+                // 1. Can I hit?
+                // 2. Can I make a point?
+                // 3. Can I run home?
+                // 4. Random valid move.
+                
+                const possibleMoves = [];
+                // Calculate all possible moves for current dice
+                // This is a simplified "Greedy" approach
+                
+                // Check Bar first
+                if (bar.black > 0) {
+                    movesLeft.forEach((die, dieIdx) => {
+                        const targetIdx = die - 1; // Black enters 0-5 (visual) -> actual index 0-5
+                         if (isValidMove('bar', targetIdx, 'black')) {
+                            possibleMoves.push({ from: 'bar', to: targetIdx, dieIdx, score: 10 });
+                         }
+                    });
+                } else {
+                    // Check board
+                    board.forEach((point, idx) => {
+                        if (point.player === 'black') {
+                            movesLeft.forEach((die, dieIdx) => {
+                                const targetIdx = idx + die;
+                                if (isValidMove(idx, targetIdx, 'black')) {
+                                    let score = 1;
+                                    // Logic scoring
+                                    if (board[targetIdx].player === 'white' && board[targetIdx].count === 1) score += 50; // Hit!
+                                    if (board[targetIdx].player === 'black' && board[targetIdx].count === 1) score += 20; // Make point
+                                    if (targetIdx > 23) score += 100; // Bear off
+                                    possibleMoves.push({ from: idx, to: targetIdx, dieIdx, score });
+                                }
+                            });
+                        }
+                    });
+                }
+
+                if (possibleMoves.length > 0) {
+                    // Sort by score
+                    possibleMoves.sort((a, b) => b.score - a.score);
+                    const move = CONFIG.hardMode ? possibleMoves[0] : possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                    
+                    performMove(move.from, move.to, move.dieIdx);
+                } else {
+                    // No moves possible
+                    setMovesLeft([]); // Skip turn
+                }
+            };
+
+            // Check if player can bear off
+            const canBearOff = (player) => {
+                if (player === 'white' && bar.white > 0) return false;
+                if (player === 'black' && bar.black > 0) return false;
+
+                // Check if all checkers are in home quadrant
+                // White home: 0-5. Black home: 18-23.
+                // Note: My internal representation:
+                // White moves 23 -> 0. Home is 0-5.
+                // Black moves 0 -> 23. Home is 18-23.
+                
+                let checkersOutsideHome = 0;
+                board.forEach((pt, idx) => {
+                    if (pt.player === player) {
+                        if (player === 'white' && idx > 5) checkersOutsideHome++;
+                        if (player === 'black' && idx < 18) checkersOutsideHome++;
+                    }
+                });
+                return checkersOutsideHome === 0;
+            };
+
+            // Validate Move
+            const isValidMove = (from, to, player) => {
+                // Moving off board (Bearing Off)
+                if ((player === 'white' && to < 0) || (player === 'black' && to > 23)) {
+                    if (!canBearOff(player)) return false;
+                    
+                    // Exact roll rule or higher roll if pieces furthest away
+                    // Simplified for 4th grade: Just allow bear off if roll is sufficient
+                    return true; 
+                }
+
+                // Destination within board bounds
+                if (to < 0 || to > 23) return false;
+
+                const destPoint = board[to];
+                
+                // Destination blocked by opponent (2 or more)
+                if (destPoint.player && destPoint.player !== player && destPoint.count >= 2) return false;
+
+                return true;
+            };
+
+            // Click Handler
+            const handlePointClick = (index) => {
+                if (winner) return;
+                if (gameMode === 'cpu' && turn === 'black') return;
+                if (dice.length === 0 || movesLeft.length === 0) return;
+
+                // If check selected, try to move
+                if (selectedPoint !== null) {
+                    // Is this a valid destination?
+                    if (validDestinations.includes(index)) {
+                        // Find which die allows this move
+                        const diff = Math.abs(selectedPoint === 'bar' ? (turn === 'white' ? 24 : -1) - index : selectedPoint - index);
+                        
+                        // Simple die finder (takes first match)
+                        const dieIdx = movesLeft.indexOf(diff);
+                        if (dieIdx > -1) {
+                            performMove(selectedPoint, index, dieIdx);
+                            return;
+                        }
+                        // Handle bearing off logic variations here if needed, but basic matching usually works
+                    }
+                    // Deselect if clicking elsewhere invalid
+                    setSelectedPoint(null);
+                    setValidDestinations([]);
+                }
+
+                // Select logic
+                // Can't select board points if you have checkers on bar
+                const myBarCount = turn === 'white' ? bar.white : bar.black;
+                if (myBarCount > 0) {
+                     // Must click bar to select
+                     // Handled by bar click handler, but if they click board, ignore
+                     return;
+                }
+
+                // Select a point
+                if (board[index].player === turn) {
+                    setSelectedPoint(index);
+                    calculateValidDestinations(index, turn);
+                }
+            };
+
+            const handleBarClick = () => {
+                if (winner) return;
+                if (gameMode === 'cpu' && turn === 'black') return;
+                const myBarCount = turn === 'white' ? bar.white : bar.black;
+                if (myBarCount > 0) {
+                    setSelectedPoint('bar');
+                    calculateValidDestinations('bar', turn);
+                }
+            };
+
+            // NEW: Handle clicking the Bear Off tray
+            const handleTrayClick = () => {
+                 if (selectedPoint === null) return;
+                 // Check if any valid destination is off-board
+                 // White goes to negative index, Black goes to > 23
+                 const offBoardDest = validDestinations.find(d => 
+                     (turn === 'white' && d < 0) || (turn === 'black' && d > 23)
+                 );
+                 
+                 if (offBoardDest !== undefined) {
+                     // Find the die that corresponds to this specific move
+                     const diff = Math.abs(selectedPoint - offBoardDest);
+                     
+                     // In simplified bear off logic, the 'diff' is usually the exact die roll
+                     let dieIdx = movesLeft.indexOf(diff);
+                     
+                     // Fallback: If exact die not found (e.g. rolled 6, moving from 2-point), 
+                     // we look for any die that creates this destination math
+                     if (dieIdx === -1) {
+                        // This usually happens when bearing off with a die larger than the point index
+                        // For simplicity, we grab the first valid large die
+                        dieIdx = movesLeft.findIndex(d => d >= diff);
+                     }
+                     
+                     if (dieIdx > -1) {
+                        performMove(selectedPoint, offBoardDest, dieIdx);
+                     }
+                 }
+            };
+
+            const calculateValidDestinations = (fromIdx, player) => {
+                const dests = [];
+                // Unique dice values to avoid duplicate calculations
+                const uniqueDice = [...new Set(movesLeft)];
+
+                uniqueDice.forEach(die => {
+                    let targetIdx;
+                    if (player === 'white') {
+                        // Moving 23 -> 0
+                        targetIdx = fromIdx === 'bar' ? 24 - die : fromIdx - die;
+                    } else {
+                        // Moving 0 -> 23
+                        targetIdx = fromIdx === 'bar' ? die - 1 : fromIdx + die;
+                    }
+
+                    if (isValidMove(fromIdx, targetIdx, player)) {
+                        dests.push(targetIdx);
+                    }
+                });
+                setValidDestinations(dests);
+            };
+
+            const performMove = (from, to, dieIdx) => {
+                const newBoard = [...board];
+                const player = turn;
+                const opponent = player === 'white' ? 'black' : 'white';
+                
+                // 1. Remove from source
+                if (from === 'bar') {
+                    setBar(prev => ({ ...prev, [player]: prev[player] - 1 }));
+                } else {
+                    newBoard[from].count--;
+                    if (newBoard[from].count === 0) newBoard[from].player = null;
+                }
+
+                // 2. Handle Destination
+                // Check for Hit
+                let hit = false;
+                if (to >= 0 && to <= 23) {
+                    if (newBoard[to].player === opponent && newBoard[to].count === 1) {
+                        // HIT!
+                        hit = true;
+                        newBoard[to].count = 1; // Replaces opponent
+                        newBoard[to].player = player;
+                        setBar(prev => ({ ...prev, [opponent]: prev[opponent] + 1 }));
+                        
+                        // Achievement
+                        if (player === 'white') unlockAchievement('firstHit');
+                    } else {
+                        // Normal move or making point
+                        newBoard[to].player = player;
+                        newBoard[to].count = (newBoard[to].count || 0) + 1;
+                        if (newBoard[to].count === 2 && player === 'white') unlockAchievement('safeHouse');
+                    }
+                } else {
+                    // Bear off
+                    setOff(prev => ({ ...prev, [player]: prev[player] + 1 }));
+                    if (player === 'white') unlockAchievement('runner');
+                }
+
+                setBoard(newBoard);
+                
+                // Remove used die
+                const newMoves = [...movesLeft];
+                newMoves.splice(dieIdx, 1);
+                setMovesLeft(newMoves);
+                
+                setSelectedPoint(null);
+                setValidDestinations([]);
+
+                // Check Win Condition
+                if (off[player] + (to < 0 || to > 23 ? 1 : 0) === 15) {
+                    setWinner(player);
+                    if (player === 'white') {
+                        unlockAchievement('firstWin');
+                        const newStats = { ...stats, wins: stats.wins + 1, gamesPlayed: stats.gamesPlayed + 1 };
+                        if (newStats.wins >= 5) unlockAchievement('master');
+                        setStats(newStats);
+                        saveProgress(achievements, newStats);
+                    }
+                }
+            };
+
+            // Check if turn should end automatically
+            React.useEffect(() => {
+                if (!winner && dice.length > 0 && movesLeft.length === 0) {
+                    setTimeout(endTurn, 500);
+                }
+                // Check if stuck (no valid moves)
+                // Complexity warning: Checking if *any* move is possible is complex.
+                // For this level, we rely on the user clicking "End Turn" or visual cue, 
+                // but let's add a simple check for empty moves array on CPU.
+            }, [movesLeft, winner]);
+
+            const resetGame = () => {
+                setBoard(setupBoard());
+                setTurn('white');
+                setDice([]);
+                setMovesLeft([]);
+                setBar({ white: 0, black: 0 });
+                setOff({ white: 0, black: 0 });
+                setWinner(null);
+            };
+
+            const resetProgress = () => {
+                if(confirm("Are you sure? This will delete all badges and scores.")) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    window.location.reload();
+                }
+            };
+
+            // --- RENDER HELPERS ---
+
+            // Helper to render checkers in the tray
+            const renderOffCheckers = (player) => {
+                const count = off[player];
+                return (
+                    <div className="flex flex-col-reverse items-center -space-y-4 py-2 w-full h-full justify-end">
+                        {Array.from({ length: count }).map((_, i) => (
+                            <div key={i} className={`
+                                w-8 h-2 md:w-12 md:h-3 rounded-md border
+                                ${player === 'white' ? 'bg-stone-100 border-stone-300' : 'bg-stone-800 border-black'}
+                                shadow-sm
+                            `}></div>
+                        ))}
+                    </div>
+                );
+            }
+
+            // Render a single point (triangle)
+            const renderPoint = (index, isTop) => {
+                const pt = board[index];
+                const isSelected = selectedPoint === index;
+                const isValid = validDestinations.includes(index);
+                const isBlackTriangle = index % 2 === (isTop ? 1 : 0); 
+                
+                return (
+                    <div 
+                        key={index}
+                        onClick={() => handlePointClick(index)}
+                        className={`
+                            relative flex-1 h-full flex items-end justify-center 
+                            ${isTop ? 'flex-col-reverse' : 'flex-col'}
+                            cursor-pointer group
+                        `}
+                    >
+                        {/* The Triangle Background */}
+                        <div className={`
+                            absolute w-full h-[85%] 
+                            ${isTop ? 'top-0 point-triangle' : 'bottom-0 point-triangle-down'}
+                            ${isBlackTriangle ? 'bg-wood-500' : 'bg-wood-300'}
+                            ${isValid && CONFIG.showHints ? 'opacity-80 ring-2 ring-nature-green' : 'opacity-100'}
+                        `}></div>
+                        
+                        {/* Hint Dot */}
+                        {isValid && CONFIG.showHints && (
+                            <div className={`absolute left-1/2 transform -translate-x-1/2 w-4 h-4 bg-nature-green rounded-full z-20 animate-bounce-soft ${isTop ? 'top-2' : 'bottom-2'}`}></div>
+                        )}
+
+                        {/* Checkers Stack */}
+                        <div className={`z-10 flex ${isTop ? 'flex-col' : 'flex-col-reverse'} items-center h-full py-1`}>
+                            {Array.from({ length: Math.min(pt.count, 5) }).map((_, i) => (
+                                <div key={i} className={`
+                                    w-8 h-8 md:w-10 md:h-10 rounded-full border-2 
+                                    ${pt.player === 'white' ? 'bg-stone-100 border-stone-300' : 'bg-stone-800 border-black'}
+                                    checker -my-1 shadow-md
+                                    ${isSelected && i === Math.min(pt.count, 5) - 1 ? 'ring-4 ring-yellow-400' : ''}
+                                `}>
+                                    {/* Number if stack > 5 */}
+                                    {i === 4 && pt.count > 5 && (
+                                        <span className={`flex items-center justify-center h-full text-xs font-bold ${pt.player === 'white' ? 'text-black' : 'text-white'}`}>
+                                            +{pt.count - 5}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            // Main Board Structure
+            // Top Row: Indices 12-23 (Left to Right: 12..17 | 18..23)
+            // Bottom Row: Indices 11-0 (Left to Right: 11..6 | 5..0)
+            
+            // To make visual logic easier for kids:
+            // Standard Board: White moves C-shape.
+            // Top Right is White's start (23). Bottom Right is White's home (0).
+            
+            // Top Left: 12-17. Top Right: 18-23.
+            // Bottom Left: 11-6. Bottom Right: 5-0.
+            
+            const quadrantTopLeft = [12, 13, 14, 15, 16, 17];
+            const quadrantTopRight = [18, 19, 20, 21, 22, 23];
+            const quadrantBottomLeft = [11, 10, 9, 8, 7, 6];
+            const quadrantBottomRight = [5, 4, 3, 2, 1, 0];
+            
+            // Logic to see if we should highlight the bear off tray
+            const canBearOffNow = validDestinations.some(d => d < 0 || d > 23);
+
+            return (
+                <div className="flex w-full h-full max-w-[1366px] bg-wood-200 shadow-2xl overflow-hidden relative">
+                    
+                    {/* Left Sidebar: Controls & Stats */}
+                    <div className="w-64 bg-wood-800 text-wood-100 p-4 flex flex-col justify-between shadow-xl z-20">
+                        <div>
+                            <h1 className="text-3xl font-bold mb-1 text-nature-cream font-serif"><i className="fas fa-leaf mr-2"></i>Backgammon</h1>
+                            <p className="text-xs text-wood-300 mb-6">Class 4B Edition</p>
+
+                            <div className="bg-wood-500 rounded-lg p-3 mb-4 text-center shadow-inner">
+                                <h3 className="text-sm uppercase tracking-widest text-wood-300 mb-2">Turn</h3>
+                                <div className="text-2xl font-bold flex items-center justify-center gap-2">
+                                    {turn === 'white' ? <span className="text-white"><i className="fas fa-circle"></i> YOU</span> : <span className="text-black"><i className="fas fa-circle"></i> {gameMode === 'cpu' ? 'CPU' : 'P2'}</span>}
+                                </div>
+                                <div className="mt-2 text-sm text-wood-200">
+                                    {movesLeft.length > 0 ? `Moves: ${movesLeft.join(', ')}` : "Roll to start!"}
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center mb-6">
+                                {dice.length > 0 ? (
+                                    <div className="flex gap-4">
+                                        {dice.map((d, i) => (
+                                            <div key={i} className="w-12 h-12 bg-white text-black rounded-lg flex items-center justify-center text-2xl font-bold shadow-lg border-2 border-gray-300">
+                                                {d}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <button 
+                                        onClick={rollDice}
+                                        disabled={winner || (gameMode === 'cpu' && turn === 'black')}
+                                        className="bg-nature-green hover:bg-nature-darkGreen text-white font-bold py-3 px-6 rounded-full shadow-lg transform transition hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        ROLL DICE
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {/* Off Board Stats (Text) - Optional now that we have tray, but good for exact count */}
+                            <div className="space-y-2 opacity-60">
+                                <div className="flex justify-between items-center bg-wood-500 p-2 rounded text-xs">
+                                    <span>White Off:</span>
+                                    <span className="font-bold">{off.white}/15</span>
+                                </div>
+                                <div className="flex justify-between items-center bg-wood-500 p-2 rounded text-xs">
+                                    <span>Black Off:</span>
+                                    <span className="font-bold">{off.black}/15</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <button onClick={() => setShowAchievements(true)} className="w-full bg-wood-400 hover:bg-wood-500 py-2 rounded text-sm font-bold flex items-center justify-center gap-2">
+                                <i className="fas fa-trophy text-yellow-400"></i> Badges
+                            </button>
+                            <button onClick={() => setShowRules(true)} className="w-full bg-wood-400 hover:bg-wood-500 py-2 rounded text-sm font-bold">
+                                <i className="fas fa-book mr-2"></i> How to Play
+                            </button>
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                <button onClick={resetGame} className="bg-wood-500 hover:bg-wood-600 py-1 rounded text-xs">New Game</button>
+                                <button onClick={() => setGameMode(prev => prev === 'cpu' ? 'local' : 'cpu')} className="bg-wood-500 hover:bg-wood-600 py-1 rounded text-xs">
+                                    {gameMode === 'cpu' ? 'Vs Friend' : 'Vs CPU'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Center Area Container: Board + BearOff Tray */}
+                    <div className="flex-1 flex relative overflow-hidden">
+                        
+                        {/* The Board Area */}
+                        <div className="flex-1 p-4 flex flex-col relative h-full">
+                            
+                            {/* The Bar (Center Strip) */}
+                            <div 
+                                onClick={handleBarClick}
+                                className={`absolute left-1/2 top-4 bottom-4 w-16 bg-wood-800 transform -translate-x-1/2 rounded shadow-inner flex flex-col justify-center items-center py-4 z-10 cursor-pointer ${bar[turn] > 0 ? 'ring-2 ring-red-500' : ''}`}
+                            >
+                                <div className="flex-1 flex flex-col justify-center gap-1 w-full items-center border-b border-wood-600">
+                                    {/* White Bar */}
+                                    {Array.from({ length: bar.white }).map((_, i) => (
+                                        <div key={i} className="w-8 h-8 rounded-full bg-stone-100 border-2 border-stone-300 shadow"></div>
+                                    ))}
+                                    {bar.white > 0 && <span className="text-white font-bold text-xs">{bar.white}</span>}
+                                </div>
+                                <div className="text-wood-400 font-serif font-bold py-2 tracking-widest text-center text-xs">BAR</div>
+                                <div className="flex-1 flex flex-col justify-center gap-1 w-full items-center border-t border-wood-600">
+                                    {/* Black Bar */}
+                                    {Array.from({ length: bar.black }).map((_, i) => (
+                                        <div key={i} className="w-8 h-8 rounded-full bg-stone-800 border-2 border-black shadow"></div>
+                                    ))}
+                                    {bar.black > 0 && <span className="text-white font-bold text-xs">{bar.black}</span>}
+                                </div>
+                            </div>
+
+                            {/* Top Half (13-24) */}
+                            <div className="flex-1 flex border-4 border-wood-500 rounded-t-lg bg-wood-200">
+                                {/* Top Left (13-18) */}
+                                <div className="flex-1 flex border-r-4 border-wood-500 mr-8">
+                                    {quadrantTopLeft.map(idx => renderPoint(idx, true))}
+                                </div>
+                                {/* Top Right (19-24) */}
+                                <div className="flex-1 flex border-l-4 border-wood-500 ml-8">
+                                    {quadrantTopRight.map(idx => renderPoint(idx, true))}
+                                </div>
+                            </div>
+
+                            {/* Bottom Half (1-12) */}
+                            <div className="flex-1 flex border-4 border-t-0 border-wood-500 rounded-b-lg bg-wood-200">
+                                {/* Bottom Left (12-7) */}
+                                <div className="flex-1 flex border-r-4 border-wood-500 mr-8">
+                                    {quadrantBottomLeft.map(idx => renderPoint(idx, false))}
+                                </div>
+                                {/* Bottom Right (6-1) */}
+                                <div className="flex-1 flex border-l-4 border-wood-500 ml-8 bg-nature-cream/20">
+                                    {quadrantBottomRight.map(idx => renderPoint(idx, false))}
+                                </div>
+                            </div>
+                            
+                            {/* Winner Overlay */}
+                            {winner && (
+                                <div className="absolute inset-0 z-40 bg-black/60 flex items-center justify-center">
+                                    <div className="bg-wood-100 p-8 rounded-xl shadow-2xl text-center border-4 border-nature-green animate-bounce">
+                                        <h2 className="text-4xl font-bold text-wood-800 mb-2">
+                                            {winner === 'white' ? "YOU WON!" : "BLACK WINS!"}
+                                        </h2>
+                                        <p className="text-xl mb-6">Great game!</p>
+                                        <button onClick={resetGame} className="bg-nature-green text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-nature-darkGreen">
+                                            Play Again
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* RIGHT SIDEBAR: BEAR OFF TRAYS */}
+                        <div 
+                            onClick={handleTrayClick}
+                            className={`
+                                w-24 bg-wood-800 border-l-4 border-wood-500 flex flex-col py-4 relative cursor-pointer
+                                transition-colors duration-300
+                                ${canBearOffNow ? 'bg-wood-500 ring-inset ring-4 ring-nature-green/70' : ''}
+                                hover:bg-wood-500
+                            `}
+                        >
+                            {/* Top Tray (Black Home/Bear Off) */}
+                             <div className="flex-1 flex flex-col items-center gap-1 border-b-2 border-wood-400 p-2">
+                                <span className="text-wood-300 text-xs font-bold uppercase mb-2">Black Off</span>
+                                {renderOffCheckers('black')}
+                             </div>
+                             
+                             {/* Bottom Tray (White Home/Bear Off) */}
+                             <div className="flex-1 flex flex-col-reverse items-center gap-1 border-t-2 border-wood-400 p-2">
+                                <span className="text-wood-300 text-xs font-bold uppercase mb-2">White Off</span>
+                                {renderOffCheckers('white')}
+                             </div>
+                        </div>
+
+                    </div>
+
+                    {/* Modals */}
+                    {showRules && (
+                        <Modal title="How to Play" onClose={() => setShowRules(false)}>
+                            <div className="space-y-4 text-wood-800">
+                                <div className="bg-nature-cream p-4 rounded-lg border border-wood-300 italic">
+                                    "{CONFIG.teacherMessage}"
+                                </div>
+                                <h3 className="font-bold text-lg border-b border-wood-400 pb-1">The Goal</h3>
+                                <p>Move all your checkers around the board into your home board (bottom right), then bear them off. The first player to get all checkers off wins!</p>
+                                
+                                <h3 className="font-bold text-lg border-b border-wood-400 pb-1">Moving</h3>
+                                <ul className="list-disc pl-5 space-y-1">
+                                    <li>Roll the dice. You move checkers by the numbers shown.</li>
+                                    <li>You can move one checker twice, or two different checkers.</li>
+                                    <li><strong>Doubles:</strong> If you roll doubles (like 4-4), you get 4 moves!</li>
+                                </ul>
+
+                                <h3 className="font-bold text-lg border-b border-wood-400 pb-1">Hitting & Safety</h3>
+                                <ul className="list-disc pl-5 space-y-1">
+                                    <li><strong>Safe House:</strong> If you have 2 or more checkers on a point, the other player can't land there.</li>
+                                    <li><strong>Hit:</strong> If you land on a point with only 1 opponent checker, you "hit" them! They go to the Bar (the middle).</li>
+                                    <li><strong>The Bar:</strong> If you are on the Bar, you must enter the board before moving anything else.</li>
+                                </ul>
+                                
+                                <div className="text-center pt-4">
+                                    <button onClick={resetProgress} className="text-xs text-red-500 hover:text-red-700 underline">Reset Saved Data (Clear Badges)</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {showAchievements && (
+                        <Modal title="Your Badges" onClose={() => setShowAchievements(false)}>
+                            <div className="grid grid-cols-1 gap-2">
+                                <Achievement 
+                                    icon="fa-star" 
+                                    title="First Win" 
+                                    desc="Win your first game against the computer." 
+                                    unlocked={achievements.firstWin} 
+                                />
+                                <Achievement 
+                                    icon="fa-bullseye" 
+                                    title="First Blood" 
+                                    desc="Hit an opponent's checker and send it to the bar." 
+                                    unlocked={achievements.firstHit} 
+                                />
+                                <Achievement 
+                                    icon="fa-shield-alt" 
+                                    title="Safe House" 
+                                    desc="Make a point (stack 2 checkers) to create a block." 
+                                    unlocked={achievements.safeHouse} 
+                                />
+                                <Achievement 
+                                    icon="fa-running" 
+                                    title="Home Stretch" 
+                                    desc="Bear off your first checker." 
+                                    unlocked={achievements.runner} 
+                                />
+                                <Achievement 
+                                    icon="fa-crown" 
+                                    title="Backgammon Master" 
+                                    desc="Win 5 total games." 
+                                    unlocked={achievements.master} 
+                                />
+                            </div>
+                            <div className="mt-4 text-center text-wood-500 font-bold">
+                                Total Wins: {stats.wins}
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+    </script>
+</body>
+</html>
