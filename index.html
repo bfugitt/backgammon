@@ -123,7 +123,7 @@
             return b;
         };
 
-        const STORAGE_KEY = 'backgammon_class_4_v3';
+        const STORAGE_KEY = 'backgammon_class_4_v4';
 
         // --- COMPONENTS ---
 
@@ -192,6 +192,7 @@
             const [selectedPoint, setSelectedPoint] = React.useState(null);
             const [validDestinations, setValidDestinations] = React.useState([]); 
             const [winner, setWinner] = React.useState(null);
+            const [canMove, setCanMove] = React.useState(true); // Track if current player has any valid moves
             
             // UX State
             const [gameMode, setGameMode] = React.useState('cpu');
@@ -217,6 +218,32 @@
                     setStats(parsed.stats);
                 }
             }, []);
+
+            // Check if player has any valid moves available
+            React.useEffect(() => {
+                if (movesLeft.length > 0 && !animation && !winner) {
+                    let hasMove = false;
+                    const myBar = turn === 'white' ? bar.white : bar.black;
+                    let sources = [];
+                    
+                    if (myBar > 0) {
+                        sources = ['bar'];
+                    } else {
+                        board.forEach((pt, i) => { if (pt.player === turn) sources.push(i); });
+                    }
+
+                    for (let src of sources) {
+                        const dests = getValidDestinations(board, src, turn, movesLeft, bar, off);
+                        if (dests.length > 0) {
+                            hasMove = true;
+                            break;
+                        }
+                    }
+                    setCanMove(hasMove);
+                } else {
+                    setCanMove(true); // Reset or hide warning during animation/no dice
+                }
+            }, [movesLeft, board, turn, bar, off, animation, winner]);
 
             React.useEffect(() => {
                 // AI Logic Loop
@@ -268,6 +295,12 @@
             const getTutorMessage = () => {
                 if (winner) return winner === 'white' ? "You Won! Fantastic job!" : "Game Over. Try again!";
                 if (gameMode === 'cpu' && turn === 'black') return "The Computer is thinking...";
+                
+                if (!canMove) {
+                    if (bar[turn] > 0) return "Oh no! The opponent has blocked your entry points. You can't enter from the bar. Click SKIP TURN.";
+                    return "Oh no! There are no legal moves you can make with these dice anywhere on the board. Click SKIP TURN.";
+                }
+
                 if (turn === 'black' && gameMode === 'local') return "Player 2 (Black) turn.";
                 
                 // Human Turn (White)
@@ -319,17 +352,18 @@
                 return true;
             };
 
-            const calculateValidDestinations = (fromIdx, player) => {
+            // Pure function to calculate valid destinations without mutating state
+            const getValidDestinations = (currentBoard, fromIdx, player, remainingDice, currentBar, currentOff) => {
                 const dests = []; 
-                const myBar = player === 'white' ? bar.white : bar.black;
-                if (myBar > 0 && fromIdx !== 'bar') return; 
+                const myBar = player === 'white' ? currentBar.white : currentBar.black;
+                if (myBar > 0 && fromIdx !== 'bar') return []; 
                 
                 const getTarget = (start, die) => {
                     if (player === 'white') return start === 'bar' ? 24 - die : start - die;
                     else return start === 'bar' ? die - 1 : start + die;
                 };
 
-                const queue = [{ currIdx: fromIdx, remainingDice: [...movesLeft], usedDice: [] }];
+                const queue = [{ currIdx: fromIdx, remainingDice: [...remainingDice], usedDice: [] }];
                 const foundDestinations = new Map(); 
 
                 const processQueue = () => {
@@ -338,7 +372,7 @@
                     const uniqueDice = [...new Set(item.remainingDice)];
                     uniqueDice.forEach(die => {
                         const target = getTarget(item.currIdx, die);
-                        if (isValidSingleStep(board, item.currIdx, target, player, bar, off)) {
+                        if (isValidSingleStep(currentBoard, item.currIdx, target, player, currentBar, currentOff)) {
                             const newUsed = [...item.usedDice, die];
                             const storeIdx = (target < 0) ? -1 : (target > 23 ? 24 : target);
                             if (!foundDestinations.has(storeIdx)) {
@@ -356,13 +390,17 @@
                 };
                 processQueue();
                 foundDestinations.forEach((diceUsed, index) => dests.push({ index, dice: diceUsed }));
-                setValidDestinations(dests);
+                return dests;
+            };
+
+            const calculateValidDestinations = (fromIdx, player) => {
+                setValidDestinations(getValidDestinations(board, fromIdx, player, movesLeft, bar, off));
             };
 
             // --- Interaction ---
 
             const handlePointClick = (index) => {
-                if (winner || animation) return;
+                if (winner || animation || !canMove) return;
                 if (gameMode === 'cpu' && turn === 'black') return;
 
                 if (selectedPoint !== null) {
@@ -385,7 +423,7 @@
             };
 
             const handleBarClick = () => {
-                if (winner || animation) return;
+                if (winner || animation || !canMove) return;
                 const myBar = turn === 'white' ? bar.white : bar.black;
                 if (myBar > 0) {
                     setSelectedPoint('bar');
@@ -394,7 +432,7 @@
             };
 
             const handleTrayClick = () => {
-                if (selectedPoint === null || animation) return;
+                if (selectedPoint === null || animation || !canMove) return;
                 const move = validDestinations.find(d => d.index === -1 || d.index === 24);
                 if (move) triggerMove(selectedPoint, move.index, move.dice);
             };
@@ -563,6 +601,7 @@
             };
 
             const canBearOffNow = validDestinations.some(d => d.index === -1 || d.index === 24);
+            const isHumanTurn = gameMode === 'local' || turn === 'white';
 
             return (
                 <div className="flex w-full h-full max-w-[1366px] bg-wood-200 shadow-2xl overflow-hidden relative">
@@ -570,14 +609,14 @@
                     <div className="w-64 bg-wood-800 text-wood-100 p-4 flex flex-col justify-between shadow-xl z-20">
                         <div>
                             <h1 className="text-3xl font-bold mb-1 text-nature-cream font-serif"><i className="fas fa-leaf mr-2"></i>Backgammon</h1>
-                            <p className="text-xs text-wood-300 mb-6">Class 4B Edition v3.0</p>
+                            <p className="text-xs text-wood-300 mb-6">Class 4B Edition v4.0</p>
                             
                             {/* Tutor Box */}
                             {showTutor && (
-                                <div className="bg-nature-cream text-wood-800 p-3 rounded-lg mb-4 text-sm border-l-4 border-nature-green shadow-lg relative animate-bounce-soft">
-                                    <div className="font-bold text-nature-darkGreen mb-1"><i className="fas fa-graduation-cap mr-1"></i> Tutor</div>
+                                <div className={`p-3 rounded-lg mb-4 text-sm border-l-4 shadow-lg relative animate-bounce-soft ${!canMove ? 'bg-red-100 text-red-900 border-red-500' : 'bg-nature-cream text-wood-800 border-nature-green'}`}>
+                                    <div className={`font-bold mb-1 ${!canMove ? 'text-red-700' : 'text-nature-darkGreen'}`}><i className="fas fa-graduation-cap mr-1"></i> Tutor</div>
                                     {getTutorMessage()}
-                                    <div className="absolute -left-2 top-4 w-0 h-0 border-t-[8px] border-t-transparent border-r-[8px] border-r-nature-green border-b-[8px] border-b-transparent"></div>
+                                    <div className={`absolute -left-2 top-4 w-0 h-0 border-t-[8px] border-t-transparent border-r-[8px] border-b-[8px] border-b-transparent ${!canMove ? 'border-r-red-500' : 'border-r-nature-green'}`}></div>
                                 </div>
                             )}
 
@@ -590,11 +629,20 @@
                                     {movesLeft.length > 0 ? `Moves: ${movesLeft.join(', ')}` : "Roll to start!"}
                                 </div>
                             </div>
-                            <div className="flex justify-center mb-6">
-                                {dice.length > 0 ? (
+                            
+                            <div className="flex flex-col items-center mb-6 gap-3">
+                                {dice.length > 0 && (
                                     <div className="flex gap-4">{dice.map((d, i) => <Die key={i} value={d} style={diceStyle} />)}</div>
+                                )}
+                                
+                                {dice.length === 0 ? (
+                                    <button onClick={rollDice} disabled={winner || (gameMode === 'cpu' && turn === 'black') || animation} className="bg-nature-green hover:bg-nature-darkGreen text-white font-bold py-3 px-6 rounded-full shadow-lg transform transition hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed w-full">ROLL DICE</button>
                                 ) : (
-                                    <button onClick={rollDice} disabled={winner || (gameMode === 'cpu' && turn === 'black') || animation} className="bg-nature-green hover:bg-nature-darkGreen text-white font-bold py-3 px-6 rounded-full shadow-lg transform transition hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">ROLL DICE</button>
+                                    !canMove && isHumanTurn && (
+                                        <button onClick={() => setMovesLeft([])} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 w-full rounded-full shadow-lg transform transition hover:scale-105 animate-bounce">
+                                            SKIP TURN
+                                        </button>
+                                    )
                                 )}
                             </div>
                         </div>
