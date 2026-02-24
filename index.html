@@ -123,7 +123,7 @@
             return b;
         };
 
-        const STORAGE_KEY = 'backgammon_class_4_v4';
+        const STORAGE_KEY = 'backgammon_class_4_v5';
 
         // --- COMPONENTS ---
 
@@ -192,7 +192,7 @@
             const [selectedPoint, setSelectedPoint] = React.useState(null);
             const [validDestinations, setValidDestinations] = React.useState([]); 
             const [winner, setWinner] = React.useState(null);
-            const [canMove, setCanMove] = React.useState(true); // Track if current player has any valid moves
+            const [canMove, setCanMove] = React.useState(true); 
             
             // UX State
             const [gameMode, setGameMode] = React.useState('cpu');
@@ -241,7 +241,7 @@
                     }
                     setCanMove(hasMove);
                 } else {
-                    setCanMove(true); // Reset or hide warning during animation/no dice
+                    setCanMove(true);
                 }
             }, [movesLeft, board, turn, bar, off, animation, winner]);
 
@@ -306,9 +306,28 @@
                 // Human Turn (White)
                 if (dice.length === 0) return "It's your turn! Click 'ROLL DICE' to see how far you can move.";
                 
+                const uniqueMoves = [...new Set(movesLeft)];
+
+                // SCENARIO 1: Checker on the Bar
                 if (bar.white > 0) {
-                    if (selectedPoint === 'bar') return "Good! Now click a green dot in the opponent's home board to enter.";
-                    return "Uh oh! You have a checker on the BAR. You must click the center Bar to enter the board first.";
+                    if (selectedPoint === 'bar') {
+                        return `Good! Now click a green dot in the opponent's home board to enter. Your available rolls are: ${uniqueMoves.join(' or ')}.`;
+                    }
+                    return `You have a checker on the BAR! Your only legal move is to click your checker on the center Bar, then place it on the board using your roll (${uniqueMoves.join(' or ')}).`;
+                }
+
+                // SCENARIO 2: Bearing Off Stage Check
+                let checkersOutside = 0;
+                board.forEach((pt, idx) => { if (pt.player === 'white' && idx > 5) checkersOutside++; });
+                const bearingOff = (checkersOutside === 0 && board.some(pt => pt.player === 'white'));
+
+                if (bearingOff && selectedPoint === null) {
+                    return `Bear Off Stage! You rolled ${uniqueMoves.join(' and ')}. Click a checker on point ${uniqueMoves.join(' or ')} (or your highest remaining if that point is empty), then click the Tray on the right!`;
+                }
+                
+                if (bearingOff && selectedPoint !== null) {
+                    const canBearOffDest = validDestinations.some(d => d.index === -1);
+                    if (canBearOffDest) return "Great! Now click the Tray on the right to Bear Off this checker and score!";
                 }
 
                 if (selectedPoint === null) {
@@ -352,7 +371,6 @@
                 return true;
             };
 
-            // Pure function to calculate valid destinations without mutating state
             const getValidDestinations = (currentBoard, fromIdx, player, remainingDice, currentBar, currentOff) => {
                 const dests = []; 
                 const myBar = player === 'white' ? currentBar.white : currentBar.black;
@@ -544,16 +562,19 @@
                 
                 return (
                     <div id={getDomId('point', index)} key={index} onClick={() => handlePointClick(index)}
-                        className={`relative flex-1 h-full flex items-end justify-center ${isTop ? 'flex-col-reverse' : 'flex-col'} cursor-pointer group`}
+                        className={`relative flex-1 h-full cursor-pointer group`}
                     >
                         <div className={`absolute w-full h-[85%] ${isTop ? 'top-0 point-triangle' : 'bottom-0 point-triangle-down'} ${isBlackTriangle ? 'bg-wood-500' : 'bg-wood-300'} ${validMove && CONFIG.showHints ? 'opacity-80 ring-2 ring-nature-green' : 'opacity-100'}`}></div>
+                        
                         {validMove && CONFIG.showHints && (
                             <div className={`absolute left-1/2 transform -translate-x-1/2 z-20 flex flex-col items-center ${isTop ? 'top-2' : 'bottom-2'}`}>
                                 <div className="w-4 h-4 bg-nature-green rounded-full animate-bounce-soft"></div>
                                 {validMove.dice.length > 1 && <span className="text-[10px] font-bold text-white bg-black/50 px-1 rounded mt-1">{validMove.dice.join('+')}</span>}
                             </div>
                         )}
-                        <div className={`z-10 flex ${isTop ? 'flex-col' : 'flex-col-reverse'} items-center h-full py-1`}>
+                        
+                        {/* Changed this container to absolute inset-0 to perfectly center within the width of the point */}
+                        <div className={`absolute inset-0 z-10 flex ${isTop ? 'flex-col' : 'flex-col-reverse'} items-center py-1`}>
                             {Array.from({ length: Math.min(pt.count, 5) }).map((_, i) => (
                                 <div key={i} className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 ${pt.player === 'white' ? 'bg-stone-100 border-stone-300' : 'bg-stone-800 border-black'} checker -my-1 shadow-md ${isSelected && i === Math.min(pt.count, 5) - 1 ? 'ring-4 ring-yellow-400' : ''}`}>
                                     {i === 4 && pt.count > 5 && <span className={`flex items-center justify-center h-full text-xs font-bold ${pt.player === 'white' ? 'text-black' : 'text-white'}`}>+{pt.count - 5}</span>}
@@ -609,7 +630,7 @@
                     <div className="w-64 bg-wood-800 text-wood-100 p-4 flex flex-col justify-between shadow-xl z-20">
                         <div>
                             <h1 className="text-3xl font-bold mb-1 text-nature-cream font-serif"><i className="fas fa-leaf mr-2"></i>Backgammon</h1>
-                            <p className="text-xs text-wood-300 mb-6">Class 4B Edition v4.0</p>
+                            <p className="text-xs text-wood-300 mb-6">Class 4B Edition v5.0</p>
                             
                             {/* Tutor Box */}
                             {showTutor && (
